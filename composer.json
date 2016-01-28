@@ -7,9 +7,15 @@
         "name": "Stephen Coakley",
         "email": "me@stephencoakley.com"
     }],
+    "repositories": [
+        {
+            "url": "https://github.com/valinurovam/phpws.git",
+            "type": "git"
+        }
+    ],
     "require": {
         "php": ">=5.5",
-        "devristo/phpws": "dev-master",
+        "devristo/phpws": "~1.0.2",
         "evenement/evenement": "2.0.*",
         "guzzlehttp/guzzle": "~6.0",
         "react/event-loop": "^0.4.1",

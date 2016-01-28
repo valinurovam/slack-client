@@ -4,6 +4,8 @@ namespace Slack;
 use Devristo\Phpws\Client\WebSocket;
 use Devristo\Phpws\Messaging\WebSocketMessageInterface;
 use Evenement\EventEmitterTrait;
+use GuzzleHttp\ClientInterface;
+use React\EventLoop\LoopInterface;
 use React\Promise;
 use Slack\Message\Message;
 
@@ -61,6 +63,22 @@ class RealTimeClient extends ApiClient
     protected $dms = [];
 
     /**
+     * @var string
+     */
+    protected $dns;
+
+    /**
+     * @param LoopInterface $loop
+     * @param ClientInterface|null $httpClient
+     * @param string $dns
+     */
+    public function __construct(LoopInterface $loop, ClientInterface $httpClient = null, $dns = '8.8.8.8')
+    {
+        $this->dns = $dns;
+        parent::__construct($loop, $httpClient);
+    }
+
+    /**
      * Connects to the real-time messaging server.
      *
      * @return \React\Promise\PromiseInterface
@@ -73,65 +91,79 @@ class RealTimeClient extends ApiClient
         $this->apiCall('rtm.start')
 
         // then connect to the socket...
-        ->then(function (Payload $response) {
-            $responseData = $response->getData();
-            // get the team info
-            $this->team = new Team($this, $responseData['team']);
+        ->then(
+            function (Payload $response) {
+                $responseData = $response->getData();
+                // get the team info
+                $this->team = new Team($this, $responseData['team']);
 
-            // Populate self user.
-            $this->users[$responseData['self']['id']] = new User($this, $responseData['self']);
+                // Populate self user.
+                $this->users[$responseData['self']['id']] = new User($this, $responseData['self']);
 
-            // populate list of users
-            foreach ($responseData['users'] as $data) {
-                $this->users[$data['id']] = new User($this, $data);
+                // populate list of users
+                foreach ($responseData['users'] as $data) {
+                    $this->users[$data['id']] = new User($this, $data);
+                }
+
+                // populate list of channels
+                foreach ($responseData['channels'] as $data) {
+                    $this->channels[$data['id']] = new Channel($this, $data);
+                }
+
+                // populate list of groups
+                foreach ($responseData['groups'] as $data) {
+                    $this->groups[$data['id']] = new Group($this, $data);
+                }
+
+                // populate list of dms
+                foreach ($responseData['ims'] as $data) {
+                    $this->dms[$data['id']] = new DirectMessageChannel($this, $data);
+                }
+
+                // Make a dummy log to make PHPWS happy
+                $logger = new \Zend\Log\Logger();
+                $logger->addWriter(new \Zend\Log\Writer\Noop());
+
+                // initiate the websocket connection
+                $this->websocket = new WebSocket(
+                    $responseData['url'],
+                    $this->loop,
+                    $logger,
+                    null,
+                    $this->dns
+                );
+                $this->websocket->on('message', function ($message) {
+                    $this->onMessage($message);
+                });
+
+                return $this->websocket->open();
+            },
+            function ($exception) use ($deferred) {
+                // if connection was not succesfull
+                $deferred->reject(new ConnectionException(
+                    'Could not connect to Slack API: ' . $exception->getMessage(),
+                    $exception->getCode()
+                ));
             }
-
-            // populate list of channels
-            foreach ($responseData['channels'] as $data) {
-                $this->channels[$data['id']] = new Channel($this, $data);
-            }
-
-            // populate list of groups
-            foreach ($responseData['groups'] as $data) {
-                $this->groups[$data['id']] = new Group($this, $data);
-            }
-
-            // populate list of dms
-            foreach ($responseData['ims'] as $data) {
-                $this->dms[$data['id']] = new DirectMessageChannel($this, $data);
-            }
-
-            // Make a dummy log to make PHPWS happy
-            $logger = new \Zend\Log\Logger();
-            $logger->addWriter(new \Zend\Log\Writer\Noop());
-
-            // initiate the websocket connection
-            $this->websocket = new WebSocket($responseData['url'], $this->loop, $logger);
-            $this->websocket->on('message', function ($message) {
-                $this->onMessage($message);
-            });
-
-            return $this->websocket->open();
-        }, function($exception) use ($deferred) {
-            // if connection was not succesfull
-            $deferred->reject(new ConnectionException(
-                'Could not connect to Slack API: '. $exception->getMessage(),
-                $exception->getCode()
-            ));
-        })
+        )
 
         // then wait for the connection to be ready.
-        ->then(function () use ($deferred) {
-            $this->once('hello', function () use ($deferred) {
-                $deferred->resolve();
-            });
+        ->then(
+            function () use ($deferred) {
+                $this->once('hello', function () use ($deferred) {
+                    $deferred->resolve();
+                });
 
-            $this->once('error', function ($data) use ($deferred) {
-                $deferred->reject(new ConnectionException(
-                    'Could not connect to WebSocket: '.$data['error']['msg'],
-                    $data['error']['code']));
-            });
-        });
+                $this->once('error', function ($data) use ($deferred) {
+                    $deferred->reject(
+                        new ConnectionException(
+                            'Could not connect to WebSocket: ' . $data['error']['msg'],
+                            $data['error']['code']
+                        )
+                    );
+                });
+            }
+        );
 
         return $deferred->promise();
     }
