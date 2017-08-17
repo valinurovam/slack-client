@@ -2,6 +2,16 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org).
 
+## [0.3.1] - 2017-08-17
+### Added
+- Ability to send messages not as user
+- You can now set display username for bot messages
+
+### Fixed
+- Fixed handled socket messages structures:
+  - channel_created, channel_deleted, channel_archive, channel_unarchive
+  - group_rename, group_archive, group_unarchive
+
 ## [0.3.0] - 2017-04-19
 ### Added
 - Advanced message attachments can now be created using `AttachmentBuilder`.
